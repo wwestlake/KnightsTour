@@ -7,10 +7,11 @@ let readline () =
     let result = Console.ReadLine();
     match result with
     | null -> fail "Reached of of file"
-    | _ -> succeed result
+    | _ -> Success (result,[""])
 
-let output result = function
-    | Success (v, _) -> printfn v
+let output result = 
+    match result with
+    | Success (v, _) -> printfn "%s" v
                         result
     | Failure msg    -> msg |> List.iter (printfn "%s")
                         result
