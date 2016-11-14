@@ -1,4 +1,7 @@
-﻿module Rop
+﻿// Borrowed from F# for fun and profit
+// https://fsharpforfunandprofit.com/ddd/
+
+module Rop
 
 /// A Result is a success or failure
 /// The Success case has a success value, plus a list of messages
