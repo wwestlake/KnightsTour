@@ -19,123 +19,131 @@
     Source code available at: https://github.com/wwestlake/KnightsTour
 *)
 
+// #load "Rop.fs"
+
 module SimpleTour
-
-
-// brute force attack on Knight's Tour problem
-//
-// Approach 1:
-//
-//     Pick a random location on the board
-//     begin recursion
-//          Get a list of valid moves from the current location
-//          pick a random move
-//          make the move
-//          if no more moves return
-//          otherwise recurse
-
 open Rop
-open GraphLib
 
-type Solution<'T> =
-    | Valid of 'T
-    | Incomplete of 'T
-    | Invalid of 'T
 
-let isValid m = Valid m
-let isInvalid m = Invalid m
-let isIncomplete m = Incomplete m
 
-type Move = Move of (int * int)
 type Position = Position of (int * int)
-type MoveList = MoveList of Move list
-type TryList = TryList of Move list
-type ValidMoveList = ValidMoveList of Move list
-type Offset = Offset of (int * int)
-
-let positionToMove (Move move) =
-    Position move
-
-let moveToPosition (Position pos) =
-    Move pos
+type Move = Move of (int * int)
+type Board = Board of (int * int) list
+type ValidMoves = ValidMoves of (int * int) list
+type TriedMoves = TriedMoves of (int * int) list
+type TriedMovesStack = TriedMovesStack of (int * int) list list
 
 type State = {
-    BoardSize: int;
-    CurrentPosition: Position;
-    CurrentBoard: MoveList;
-    TriedMoves: TryList;
-    ValidMoves: ValidMoveList;
+    Size: int;
+    Position: Position;
+    Board: Board;
+    ValidMoves: ValidMoves;
+    TriedMoves: TriedMoves;
+    TriedMovesStack: TriedMovesStack;
 }
 
-
-
-
-// the offset positions for the knight
-let offsets =   [Offset(1,-2);Offset(2,-1);
-                 Offset(2,1);Offset(1,2);
-                 Offset(2,-1);Offset(1,-2);
-                 Offset(-1,-2);Offset(-2,-1)]
-
-let rand = new System.Random((int)System.DateTime.Now.Ticks)
-let randN max = rand.Next max
-let randPoint () = (randN 8, randN 8)
-
-// returns the valid moves given a move, then board, and a list of tried positions
-let validMoves state =
-    let { BoardSize = size; CurrentPosition = Position(lx,ly); CurrentBoard = (MoveList moves); TriedMoves = (TryList tries)} = state
+let createState size pos board valid tried triedStack =
     {
-        state with ValidMoves = offsets 
-                |> List.map (fun (Offset (x,y)) -> Move (lx + x, ly + y))        
-                |> List.filter (fun (Move (x,y)) -> x >= 0 && y >= 0 && x < size && y < size )
-                |> List.filter (fun move -> not (List.exists ((=) move) moves))        
-                |> List.filter (fun move -> not (List.exists ((=) move) tries)) |> ValidMoveList
+        Size = size;
+        Position = (Position pos);
+        Board = (Board board);
+        ValidMoves = (ValidMoves valid);
+        TriedMoves = (TriedMoves tried);
+        TriedMovesStack = (TriedMovesStack triedStack);
     }
 
-// rule checker, the board must contain 64 moves with no duplicates
-let checkResult state = 
-    let {CurrentBoard = (MoveList moves) } = state
-    if (List.length moves = 0 || List.length moves <> 64) then moves |> isIncomplete 
-    else 
-        let rec inner rest =
-            match rest with
-            | head :: tail -> if not (List.exists ((=) head) tail)
-                              then inner tail
-                              else moves |>  isInvalid
-            | [] -> moves |> isValid
-        inner moves
 
 
-let closestToCenter state =
-        let distanceToCenter size (Move (x,y)) =
-            let dx = (size / 2) - x
-            let dy = (size / 2) - y
-            (dx*dx, dy*dy)
-        let {BoardSize = size; ValidMoves = (ValidMoveList moves)} = state
-        let sorted =
-            moves 
-            |> List.map (fun move -> (move, distanceToCenter size move)) 
-            |> List.sortWith (fun (_, d1) (_, d2) -> if d1 < d2 then -1 elif d1 > d2 then 1 else 0 ) 
-        let (Move result, d) = List.head sorted
-        Move result
+let startLocations size = [
+        for i in [1..size] do
+            for j in [1..size] do
+                yield (Position (i,j))
+    ]
 
-let selectMove state = 
-    validMoves state |> closestToCenter
+let offsets = [Position ( 2,-1); Position ( 2,-1);  
+               Position ( 2, 1); Position ( 1, 2);
+               Position ( 2,-1); Position ( 1,-2);
+               Position (-1,-2); Position (-2,-1)]
 
 
+let validMoves (state: State) =
+    let { Size = size; Position = (Position (x,y)); Board = (Board board); TriedMoves = (TriedMoves tried) } = state
+    offsets |> List.map (fun (Position (ox,oy)) -> (x+ox, y+oy))
+            |> List.filter (fun (x,y) -> x > 0 && y > 0 && x <= size && y <= size)
+            |> List.filter (fun pos -> not (List.exists ((=) pos) board))
+            |> List.filter (fun pos -> not (List.exists ((=) pos) tried))
+            |> ValidMoves
 
-(*
-type State = {
-    BoardSize: int;
-    CurrentPosition: Position;
-    CurrentBoard: MoveList;
-    TriedMoves: TryList;
-    ValidMoves: ValidMoveList;
-}
+let pickClosestToCenter (state: State) =
+    let distance (x,y) =
+        let dx = ((state.Size / 2) - x)
+        let dy = ((state.Size / 2) - y)
+        (dx * dx) + (dy * dy)
+    match validMoves state with
+    | ValidMoves list -> list |> List.map( fun (x,y) -> (x,y,distance (x,y)))
+                              |> List.sortWith (fun (_,_,d1) (_,_,d2) -> d1.CompareTo(d2) )
+                              |> List.head |> (fun (x,y,_) -> (x,y)) |> Move
 
-*)
+
+let addTry (Move move) state =
+    let { TriedMoves = (TriedMoves tries) } = state
+    {
+        state with TriedMoves = (move :: tries) |> TriedMoves
+    }
+
+let pushTries state =
+    let { TriedMovesStack = (TriedMovesStack stack) } = state
+    let{TriedMoves = tries} = state
+    {
+        state with TriedMovesStack = 
+                            match tries with
+                            | TriedMoves moves ->  (moves :: stack) |> TriedMovesStack
+                   TriedMoves =  [] |> TriedMoves
+    }
+
+let popTries state =
+    let { TriedMovesStack = (TriedMovesStack stack) } = state
+    {
+        state with TriedMovesStack = List.tail stack |> TriedMovesStack
+                   TriedMoves = List.head stack |> TriedMoves
+    }
+
+let pushMove state (move: Move) =
+    let { Board = (Board board) } = state
+    {
+        state with Board = 
+                        match move with
+                        | Move m -> (m :: board) |> Board
+                   Position =
+                        match move with
+                        | Move m -> (Position m)
+    }
+
+let popMove state =
+    let { Board = (Board board) } = state
+    {
+        state with Board =  (List.tail board) |> Board
+                   Position = (List.head board) |> Position
+    }
+
+let backTrack state =
+    state |> popTries |> popMove
+
+
+let makeMove state =
+    let pushMoveToState = pushMove state
+    let move = pickClosestToCenter state
+    let addTryToState = addTry move
+    move |> pushMoveToState |> pushTries |> addTryToState
     
-//let makeMove state =
-//    let { BoardSize = size; CurrentPosition = Position(lx,ly); CurrentBoard = (MoveList moves); TriedMoves = (TryList tries)} = state
     
+
+
+
+let test = createState 8 (4,4) [] [] [] []
+
+pickClosestToCenter test
+
+
 
 
