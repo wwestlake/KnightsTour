@@ -26,6 +26,7 @@ open Rop
 
 
 
+
 type Position = Position of (int * int)
 type Move = Move of (int * int)
 type Board = Board of (int * int) list
@@ -41,6 +42,11 @@ type State = {
     TriedMoves: TriedMoves;
     TriedMovesStack: TriedMovesStack;
 }
+
+type MoveResult =
+    | Moved of State
+    | NotMoved of State
+
 
 let createState size pos board valid tried triedStack =
     {
@@ -60,10 +66,10 @@ let startLocations size = [
                 yield (Position (i,j))
     ]
 
-let offsets = [Position ( 2,-1); Position ( 2,-1);  
-               Position ( 2, 1); Position ( 1, 2);
-               Position ( 2,-1); Position ( 1,-2);
-               Position (-1,-2); Position (-2,-1)]
+let offsets = [Position ( 1,2); Position ( 1,-2);  
+               Position ( 2, 1); Position ( 2, -1);
+               Position ( -1,2); Position ( -1,-2);
+               Position (-2, 1); Position (-2,-1)]
 
 
 let validMoves (state: State) =
@@ -79,10 +85,12 @@ let pickClosestToCenter (state: State) =
         let dx = ((state.Size / 2) - x)
         let dy = ((state.Size / 2) - y)
         (dx * dx) + (dy * dy)
-    match validMoves state with
-    | ValidMoves list -> list |> List.map( fun (x,y) -> (x,y,distance (x,y)))
-                              |> List.sortWith (fun (_,_,d1) (_,_,d2) -> d1.CompareTo(d2) )
-                              |> List.head |> (fun (x,y,_) -> (x,y)) |> Move
+    let resultList = match validMoves state with
+                     | ValidMoves list -> list |> List.map( fun (x,y) -> (x,y,distance (x,y)))
+                                          |> List.sortWith (fun (_,_,d1) (_,_,d2) -> d1.CompareTo(d2) )
+    match resultList with
+    | [] -> None
+    | head::tail -> head |> (fun (x,y,_) -> (x,y)) |> Move |> Some
 
 
 let addTry (Move move) state =
@@ -127,22 +135,48 @@ let popMove state =
     }
 
 let backTrack state =
-    state |> popTries |> popMove
+    state |> popTries |> popMove |> Moved
 
 
 let makeMove state =
     let pushMoveToState = pushMove state
     let move = pickClosestToCenter state
-    let addTryToState = addTry move
-    move |> pushMoveToState |> pushTries |> addTryToState
+    match move with
+    | Some m -> let addTryToState = addTry m
+                m |> pushMoveToState |> pushTries |> addTryToState |> Moved
+    | None ->   state |> NotMoved 
     
+let boardLength {Board = (Board board)} =
+    List.length board
     
 
+let test n : RopResult<'t,'f> = createState n (4,4) [] [] [] [] |> Moved |> succeed
+
+let rec run state : RopResult<'t,'f> = 
+    match state with
+    | Success (theState,_) -> match theState with
+                              | Moved s -> printfn "make move: %A" s
+                                           s |> makeMove |> succeed |> run
+                               | NotMoved s -> if (boardLength s) = 64 then s |> succeed
+                                               else 
+                                                   printfn "backtrack: %A" s
+                                                   s |> backTrack |> succeed |> run
+    | Failure s -> fail "no solution" 
 
 
-let test = createState 8 (4,4) [] [] [] []
 
-pickClosestToCenter test
+let asyncRunner = Seq.init 4 (fun num -> (num + 1) * 8 ) 
+                  |> Seq.mapi (fun num value -> 
+                        async {
+                            return async {
+                                 return (run (test num)) 
+                                } |> Async.RunSynchronously
+                            } 
+
+                )
+run (test 8)
+
+asyncRunner |> Async.Parallel  |> Async.RunSynchronously
 
 
 
